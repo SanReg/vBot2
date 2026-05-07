@@ -23,6 +23,7 @@ const COINOS_TOKEN = process.env.COINOS_TOKEN;
 const COINOS_PIN = process.env.COINOS_PIN;
 const DATABASE_URL = process.env.DATABASE_URL;
 const COINOS_API = 'https://coinos.io/api';
+const TARGET_GUILD_ID = '931174322989580308';
 
 if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID || !COINOS_TOKEN || !COINOS_PIN || !DATABASE_URL) {
   console.error(
@@ -102,6 +103,19 @@ const commands = [
     .setDescription('Show your recent balance activity')
     .setDMPermission(true),
   new SlashCommandBuilder()
+    .setName('leaderboard')
+    .setDescription('Show top rain senders')
+    .setDMPermission(true)
+    .addStringOption((option) =>
+      option
+        .setName('type')
+        .setDescription('Leaderboard type')
+        .addChoices(
+          { name: 'makers', value: 'makers' },
+          { name: 'catchers', value: 'catchers' }
+        )
+    ),
+  new SlashCommandBuilder()
     .setName('help')
     .setDescription('Show available commands')
     .setDMPermission(true),
@@ -132,6 +146,9 @@ const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 async function registerCommands() {
   await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID), { body: commands });
   console.log('Registered global slash commands.');
+
+  await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, TARGET_GUILD_ID), { body: commands });
+  console.log(`Registered guild slash commands for ${TARGET_GUILD_ID}.`);
 }
 
 async function coinosRequest(path, method, body) {
@@ -266,20 +283,27 @@ async function syncPaidInvoices(discordId) {
     const client = await pool.connect();
     try {
       await client.query('begin');
-      await client.query(
-        'update lightning_invoices set paid_at = now(), received_sats = $1 where id = $2 and paid_at is null',
+      const updateResult = await client.query(
+        'update lightning_invoices set paid_at = now(), received_sats = $1 where id = $2 and paid_at is null returning amount_sats, hash',
         [received, invoice.id]
       );
+
+      if (updateResult.rowCount === 0) {
+        await client.query('rollback');
+        continue;
+      }
+
+      const creditedInvoice = updateResult.rows[0];
       await client.query(
         'update users set balance_sats = balance_sats + $1 where discord_id = $2',
-        [invoice.amount_sats, discordId]
+        [creditedInvoice.amount_sats, discordId]
       );
       await client.query(
         'insert into balance_ledger (discord_id, delta_sats, reason) values ($1, $2, $3)',
-        [discordId, invoice.amount_sats, `deposit:${invoice.hash}`]
+        [discordId, creditedInvoice.amount_sats, `deposit:${creditedInvoice.hash}`]
       );
       await client.query('commit');
-      credited.push({ amount: invoice.amount_sats, hash: invoice.hash });
+      credited.push({ amount: creditedInvoice.amount_sats, hash: creditedInvoice.hash });
     } catch (error) {
       await client.query('rollback');
       console.error('Failed to apply deposit:', error.message);
@@ -438,6 +462,38 @@ function truncateText(value, maxLength) {
   return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
+async function safeDeferReply(interaction, options) {
+  try {
+    await interaction.deferReply(options);
+    return true;
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error('deferReply failed:', message);
+    return false;
+  }
+}
+
+async function safeEditReply(interaction, payload) {
+  try {
+    if (interaction && typeof interaction.editReply === 'function') {
+      await interaction.editReply(payload);
+      return true;
+    }
+
+    if (interaction && typeof interaction.reply === 'function') {
+      await interaction.reply(payload);
+      return true;
+    }
+
+    console.error('editReply failed: no reply method available');
+    return false;
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error('editReply failed:', message);
+    return false;
+  }
+}
+
 function buildEmbed({ title, description, color, fields }) {
   const embed = new EmbedBuilder().setTitle(title).setColor(color);
   if (description) embed.setDescription(description);
@@ -539,7 +595,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.commandName === 'deposit') {
     const amount = interaction.options.getInteger('amount', true);
 
-    await interaction.deferReply({ ephemeral: true });
+    if (!(await safeDeferReply(interaction, { ephemeral: true }))) return;
 
     try {
       const data = await coinosRequest('/invoice', 'POST', {
@@ -596,9 +652,9 @@ client.on('interactionCreate', async (interaction) => {
         const qrBuffer = await QRCode.toBuffer(invoiceText, { width: 512, margin: 1 });
         const attachment = new AttachmentBuilder(qrBuffer, { name: 'invoice.png' });
         embed.setImage('attachment://invoice.png');
-        await interaction.editReply({ embeds: [embed], files: [attachment], components: row ? [row] : [] });
+        await safeEditReply(interaction, { embeds: [embed], files: [attachment], components: row ? [row] : [] });
       } else {
-        await interaction.editReply({ embeds: [embed], components: row ? [row] : [] });
+        await safeEditReply(interaction, { embeds: [embed], components: row ? [row] : [] });
       }
     } catch (error) {
       const embed = buildEmbed({
@@ -606,7 +662,7 @@ client.on('interactionCreate', async (interaction) => {
         description: truncateText(error.message, 200),
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     }
   }
 
@@ -614,7 +670,7 @@ client.on('interactionCreate', async (interaction) => {
     const amountSats = interaction.options.getInteger('amount', true);
     let reserved = false;
 
-    await interaction.deferReply({ ephemeral: true });
+    if (!(await safeDeferReply(interaction, { ephemeral: true }))) return;
 
     try {
       await ensureUser(interaction.user.id, interaction.user.username);
@@ -633,7 +689,7 @@ client.on('interactionCreate', async (interaction) => {
           description: 'No linked lightning address. Use /link address first.',
           color: 0xe74c3c,
         });
-        await interaction.editReply({ embeds: [embed] });
+        await safeEditReply(interaction, { embeds: [embed] });
         return;
       }
 
@@ -652,7 +708,7 @@ client.on('interactionCreate', async (interaction) => {
           description: message,
           color: 0xe74c3c,
         });
-        await interaction.editReply({ embeds: [embed] });
+        await safeEditReply(interaction, { embeds: [embed] });
         return;
       }
 
@@ -674,7 +730,7 @@ client.on('interactionCreate', async (interaction) => {
         fields,
       });
 
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
 
       if (data && data.amount) {
         const amount = Math.abs(Number(data.amount));
@@ -692,12 +748,12 @@ client.on('interactionCreate', async (interaction) => {
         description: truncateText(error.message, 200),
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     }
   }
 
   if (interaction.commandName === 'balance') {
-    await interaction.deferReply({ ephemeral: true });
+    if (!(await safeDeferReply(interaction, { ephemeral: true }))) return;
 
     try {
       await ensureUser(interaction.user.id, interaction.user.username);
@@ -730,14 +786,14 @@ client.on('interactionCreate', async (interaction) => {
         color: 0x3498db,
       });
       embed.setFooter({ text: '*Use /history to see recent transactions*' });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     } catch (error) {
       const embed = buildEmbed({
         title: 'Balance Failed ⚠️',
         description: truncateText(error.message, 200),
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     }
   }
 
@@ -745,7 +801,7 @@ client.on('interactionCreate', async (interaction) => {
     const recipientUser = interaction.options.getUser('user', true);
     const amount = interaction.options.getInteger('amount', true);
 
-    await interaction.deferReply({ ephemeral: false });
+    if (!(await safeDeferReply(interaction, { ephemeral: false }))) return;
 
     if (recipientUser.bot) {
       const embed = buildEmbed({
@@ -753,7 +809,7 @@ client.on('interactionCreate', async (interaction) => {
         description: 'You cannot tip bots.',
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
       return;
     }
 
@@ -763,7 +819,7 @@ client.on('interactionCreate', async (interaction) => {
         description: 'You cannot tip yourself.',
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
       return;
     }
 
@@ -786,7 +842,8 @@ client.on('interactionCreate', async (interaction) => {
 
       console.log('Tip transfer total:', total);
 
-      await interaction.editReply(
+      await safeEditReply(
+        interaction,
         `<a:peperain:1501114711272460358> ${interaction.user.toString()} tipped ${recipientUser.toString()} ${formatSats(total)}`
       );
 
@@ -800,7 +857,7 @@ client.on('interactionCreate', async (interaction) => {
         description: truncateText(error.message, 200),
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     }
   }
 
@@ -808,14 +865,14 @@ client.on('interactionCreate', async (interaction) => {
     const amount = interaction.options.getInteger('amount', true);
     const maxcount = interaction.options.getInteger('maxcount', true);
 
-    await interaction.deferReply({ ephemeral: false });
+    if (!(await safeDeferReply(interaction, { ephemeral: false }))) return;
 
     const preparingEmbed = buildEmbed({
       title: '<a:rain:1501110375154978916> Preparing Rain',
       description: '<a:peperain:1501114711272460358> Scanning channel for active users...',
       color: 0x8e44ad,
     });
-    await interaction.editReply({ embeds: [preparingEmbed] });
+    await safeEditReply(interaction, { embeds: [preparingEmbed] });
 
     if (!interaction.inGuild() || !interaction.channel || !interaction.channel.isTextBased()) {
       const embed = buildEmbed({
@@ -823,7 +880,7 @@ client.on('interactionCreate', async (interaction) => {
         description: 'Rain can only be used in a server text channel.',
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
       return;
     }
 
@@ -838,7 +895,7 @@ client.on('interactionCreate', async (interaction) => {
           description: 'No recent users found in this channel.',
           color: 0xe74c3c,
         });
-        await interaction.editReply({ embeds: [embed] });
+        await safeEditReply(interaction, { embeds: [embed] });
         return;
       }
 
@@ -887,7 +944,7 @@ client.on('interactionCreate', async (interaction) => {
           ].join('\n')
         );
 
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
 
       for (const recipient of recipients) {
         const user = await client.users.fetch(recipient.id);
@@ -902,12 +959,12 @@ client.on('interactionCreate', async (interaction) => {
         description: truncateText(error.message, 200),
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     }
   }
 
   if (interaction.commandName === 'history') {
-    await interaction.deferReply({ ephemeral: true });
+    if (!(await safeDeferReply(interaction, { ephemeral: true }))) return;
 
     try {
       await ensureUser(interaction.user.id, interaction.user.username);
@@ -926,7 +983,7 @@ client.on('interactionCreate', async (interaction) => {
           description: 'No balance activity yet.',
           color: 0x95a5a6,
         });
-        await interaction.editReply({ embeds: [embed] });
+        await safeEditReply(interaction, { embeds: [embed] });
         return;
       }
 
@@ -944,19 +1001,109 @@ client.on('interactionCreate', async (interaction) => {
         color: 0xf2c14e,
       });
 
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     } catch (error) {
       const embed = buildEmbed({
         title: 'History Failed ⚠️',
         description: truncateText(error.message, 200),
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
+    }
+  }
+
+  if (interaction.commandName === 'leaderboard') {
+    if (!(await safeDeferReply(interaction, { ephemeral: false }))) return;
+
+    try {
+      const leaderboardType = interaction.options.getString('type') || 'makers';
+      const isCatchers = leaderboardType === 'catchers';
+
+      const result = await query(
+        isCatchers
+          ? "select u.discord_id, u.discord_username, sum(b.delta_sats) as total_sats, count(*) as rains " +
+              "from balance_ledger b join users u on u.discord_id = b.discord_id " +
+              "where b.reason like 'rain:from:%' and b.delta_sats > 0 " +
+              "group by u.discord_id, u.discord_username " +
+              "order by total_sats desc limit 10"
+          : "select u.discord_id, u.discord_username, sum(-b.delta_sats) as total_sats, count(*) as rains " +
+              "from balance_ledger b join users u on u.discord_id = b.discord_id " +
+              "where b.reason like 'rain:out:%' and b.delta_sats < 0 " +
+              "group by u.discord_id, u.discord_username " +
+              "order by total_sats desc limit 10"
+      );
+
+      const rankResult = await query(
+        isCatchers
+          ? "select discord_id, total_sats, rains, rank from (" +
+              "select u.discord_id, sum(b.delta_sats) as total_sats, count(*) as rains, " +
+              "dense_rank() over (order by sum(b.delta_sats) desc) as rank " +
+              "from balance_ledger b join users u on u.discord_id = b.discord_id " +
+              "where b.reason like 'rain:from:%' and b.delta_sats > 0 " +
+              "group by u.discord_id" +
+              ") ranked where discord_id = $1"
+          : "select discord_id, total_sats, rains, rank from (" +
+              "select u.discord_id, sum(-b.delta_sats) as total_sats, count(*) as rains, " +
+              "dense_rank() over (order by sum(-b.delta_sats) desc) as rank " +
+              "from balance_ledger b join users u on u.discord_id = b.discord_id " +
+              "where b.reason like 'rain:out:%' and b.delta_sats < 0 " +
+              "group by u.discord_id" +
+              ") ranked where discord_id = $1",
+        [interaction.user.id]
+      );
+
+      if (result.rows.length === 0) {
+        const titlePrefix = isCatchers ? 'Catchers' : 'Makers';
+        const embed = buildEmbed({
+          title: `<a:rain:1501110375154978916> ${titlePrefix} Leaderboard`,
+          description: 'No rain activity yet.',
+          color: 0x95a5a6,
+        });
+        await safeEditReply(interaction, { embeds: [embed] });
+        return;
+      }
+
+      const lines = result.rows.map((row, index) => {
+        const rank = index + 1;
+        const rankBadge = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '<:slice:1501114342631014480>';
+        const mention = `<@${row.discord_id}>`;
+        const total = Number(row.total_sats || 0);
+        const rainCount = Number(row.rains || 0);
+        return `${rankBadge} **${rank}.** ${mention} — ${formatSats(total)} · ${rainCount} rains`;
+      });
+
+      const userRow = rankResult.rows[0];
+      const isInTop = result.rows.some((row) => row.discord_id === interaction.user.id);
+      if (userRow && !isInTop) {
+        const userTotal = Number(userRow.total_sats || 0);
+        const userRains = Number(userRow.rains || 0);
+        lines.push('------------------------------');
+        lines.push('Your position:');
+        lines.push(
+          `<a:bump:1501113105994879088> **${userRow.rank}.** <@${interaction.user.id}> — ${formatSats(userTotal)} · ${userRains} rains`
+        );
+      }
+
+      const titlePrefix = isCatchers ? 'Catchers' : 'Makers';
+      const embed = buildEmbed({
+        title: `<a:rain:1501110375154978916> ${titlePrefix} Leaderboard`,
+        description: truncateText(lines.join('\n'), 3900),
+        color: 0x3498db,
+      });
+
+      await safeEditReply(interaction, { embeds: [embed] });
+    } catch (error) {
+      const embed = buildEmbed({
+        title: 'Leaderboard Failed ⚠️',
+        description: truncateText(error.message, 200),
+        color: 0xe74c3c,
+      });
+      await safeEditReply(interaction, { embeds: [embed] });
     }
   }
 
   if (interaction.commandName === 'help') {
-    await interaction.deferReply({ ephemeral: true });
+    if (!(await safeDeferReply(interaction, { ephemeral: true }))) return;
 
     const embed = buildEmbed({
       title: 'Help 📖',
@@ -969,17 +1116,18 @@ client.on('interactionCreate', async (interaction) => {
         '**/pay payreq** — Pay a Lightning invoice from your balance',
         '**/tip user amount** — Tip a user from your balance (public)',
         '**/rain amount maxcount** — Rain sats on recent users in a channel',
+        '**/leaderboard type** — Top makers or catchers',
       ].join('\n'),
       color: 0x9b59b6,
     });
 
-    await interaction.editReply({ embeds: [embed] });
+    await safeEditReply(interaction, { embeds: [embed] });
   }
 
   if (interaction.commandName === 'link') {
     const address = interaction.options.getString('address', true).trim();
 
-    await interaction.deferReply({ ephemeral: true });
+    if (!(await safeDeferReply(interaction, { ephemeral: true }))) return;
 
     if (!address.includes('@')) {
       const embed = buildEmbed({
@@ -987,7 +1135,7 @@ client.on('interactionCreate', async (interaction) => {
         description: 'Invalid lightning address. Use name@domain.',
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
       return;
     }
 
@@ -1004,14 +1152,14 @@ client.on('interactionCreate', async (interaction) => {
         description: `Linked ${address} for withdrawals.`,
         color: 0x2ecc71,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     } catch (error) {
       const embed = buildEmbed({
         title: 'Link Failed ⚠️',
         description: truncateText(error.message, 200),
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     }
   }
 
@@ -1020,7 +1168,7 @@ client.on('interactionCreate', async (interaction) => {
     let amountSats;
     let reserved = false;
 
-    await interaction.deferReply({ ephemeral: true });
+    if (!(await safeDeferReply(interaction, { ephemeral: true }))) return;
 
     try {
       await ensureUser(interaction.user.id, interaction.user.username);
@@ -1035,7 +1183,7 @@ client.on('interactionCreate', async (interaction) => {
           description: 'Invalid Lightning invoice.',
           color: 0xe74c3c,
         });
-        await interaction.editReply({ embeds: [embed] });
+        await safeEditReply(interaction, { embeds: [embed] });
         return;
       }
 
@@ -1053,7 +1201,7 @@ client.on('interactionCreate', async (interaction) => {
           description: 'Invoice must include an amount.',
           color: 0xe74c3c,
         });
-        await interaction.editReply({ embeds: [embed] });
+        await safeEditReply(interaction, { embeds: [embed] });
         return;
       }
 
@@ -1070,7 +1218,7 @@ client.on('interactionCreate', async (interaction) => {
           description: message,
           color: 0xe74c3c,
         });
-        await interaction.editReply({ embeds: [embed] });
+        await safeEditReply(interaction, { embeds: [embed] });
         return;
       }
 
@@ -1092,7 +1240,7 @@ client.on('interactionCreate', async (interaction) => {
         fields,
       });
 
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
 
       if (data && data.amount) {
         const amount = Math.abs(Number(data.amount));
@@ -1110,7 +1258,7 @@ client.on('interactionCreate', async (interaction) => {
         description: truncateText(error.message, 200),
         color: 0xe74c3c,
       });
-      await interaction.editReply({ embeds: [embed] });
+      await safeEditReply(interaction, { embeds: [embed] });
     }
   }
 });
