@@ -9,11 +9,14 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  MessageFlags,
 } = require('discord.js');
 const dotenv = require('dotenv');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
 const bolt11 = require('bolt11');
+const { setBotStatus } = require('./status');
+const { adminCommand, userStatsCommand, changeStatusCommand, handleAdminCommand, handleAdminWithdrawalsButton, handleUserStatsCommand, handleChangeStatusCommand } = require('./admin');
 
 dotenv.config();
 
@@ -139,6 +142,9 @@ const commands = [
         .setDescription('Lightning invoice (BOLT11)')
         .setRequired(true)
     ),
+  adminCommand,
+  userStatsCommand,
+  changeStatusCommand,
 ].map((command) => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
@@ -464,7 +470,13 @@ function truncateText(value, maxLength) {
 
 async function safeDeferReply(interaction, options) {
   try {
-    await interaction.deferReply(options);
+    const deferOptions = options ? { ...options } : {};
+    if (Object.prototype.hasOwnProperty.call(deferOptions, 'ephemeral')) {
+      deferOptions.flags = deferOptions.ephemeral ? MessageFlags.Ephemeral : undefined;
+      delete deferOptions.ephemeral;
+    }
+
+    await interaction.deferReply(deferOptions);
     return true;
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
@@ -563,8 +575,9 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages],
 });
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  setBotStatus(client);
   try {
     await registerCommands();
   } catch (error) {
@@ -575,16 +588,43 @@ client.once('ready', async () => {
 client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     const customId = interaction.customId || '';
-    if (!customId.startsWith('copy_invoice:')) return;
 
-    const token = customId.replace('copy_invoice:', '');
-    const cached = invoiceCache.get(token);
-    if (!cached || cached.userId !== interaction.user.id) {
-      await interaction.reply({ content: 'Invoice expired. Please create a new deposit.', ephemeral: true });
+    if (customId.startsWith('copy_invoice:')) {
+      const token = customId.replace('copy_invoice:', '');
+      const cached = invoiceCache.get(token);
+      if (!cached || cached.userId !== interaction.user.id) {
+        await interaction.reply({
+          content: 'Invoice expired. Please create a new deposit.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.reply({ content: cached.invoiceText, flags: MessageFlags.Ephemeral });
       return;
     }
 
-    await interaction.reply({ content: cached.invoiceText, ephemeral: true });
+    let handled = false;
+    try {
+      handled = await handleAdminWithdrawalsButton(interaction, query);
+    } catch (error) {
+      console.error('Admin button failed:', error.message);
+      if (interaction.deferred || interaction.replied) {
+        await safeEditReply(interaction, {
+          content: 'Failed to load recent withdrawals.',
+          components: [],
+        });
+      } else {
+        await interaction.reply({
+          content: 'Failed to load recent withdrawals.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      return;
+    }
+
+    if (handled) return;
+
     return;
   }
 
@@ -1259,6 +1299,75 @@ client.on('interactionCreate', async (interaction) => {
         color: 0xe74c3c,
       });
       await safeEditReply(interaction, { embeds: [embed] });
+    }
+  }
+
+  if (interaction.commandName === 'admin') {
+    try {
+      await handleAdminCommand(interaction, query, coinosRequest);
+    } catch (error) {
+      console.error('Admin command failed:', error.message);
+      const embed = buildEmbed({
+        title: 'Admin Failed ⚠️',
+        description: truncateText(error.message, 200),
+        color: 0xe74c3c,
+      });
+
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await safeEditReply(interaction, { embeds: [embed], components: [] });
+        } else {
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        }
+      } catch (responseError) {
+        console.error('Failed to send admin error response:', responseError.message);
+      }
+    }
+  }
+
+  if (interaction.commandName === 'userstats') {
+    try {
+      await handleUserStatsCommand(interaction, query);
+    } catch (error) {
+      console.error('User stats command failed:', error.message);
+      const embed = buildEmbed({
+        title: 'User Stats Failed ⚠️',
+        description: truncateText(error.message, 200),
+        color: 0xe74c3c,
+      });
+
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await safeEditReply(interaction, { embeds: [embed], components: [] });
+        } else {
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        }
+      } catch (responseError) {
+        console.error('Failed to send user stats error response:', responseError.message);
+      }
+    }
+  }
+
+  if (interaction.commandName === 'changestatus') {
+    try {
+      await handleChangeStatusCommand(interaction, query);
+    } catch (error) {
+      console.error('Change status command failed:', error.message);
+      const embed = buildEmbed({
+        title: 'Change Status Failed ⚠️',
+        description: truncateText(error.message, 200),
+        color: 0xe74c3c,
+      });
+
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await safeEditReply(interaction, { embeds: [embed], components: [] });
+        } else {
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        }
+      } catch (responseError) {
+        console.error('Failed to send change status error response:', responseError.message);
+      }
     }
   }
 });
