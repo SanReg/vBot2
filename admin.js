@@ -302,16 +302,20 @@ async function handleUserStatsCommand(interaction, query) {
     const totalsResult = await query(
       "select " +
         "coalesce((select sum(delta_sats) from balance_ledger where discord_id = $1 and reason like 'deposit:%' and delta_sats > 0), 0) as total_deposits_sats, " +
-        "coalesce((select sum(-delta_sats) from balance_ledger where discord_id = $1 and (reason = 'withdraw' or reason = 'pay') and delta_sats < 0), 0) as total_withdrawals_sats",
+        "coalesce((select sum(-delta_sats) from balance_ledger where discord_id = $1 and (reason = 'withdraw' or reason = 'pay') and delta_sats < 0), 0) as total_withdrawals_sats, " +
+        "coalesce((select sum(-delta_sats) from balance_ledger where discord_id = $1 and reason like 'tip:out:%' and delta_sats < 0), 0) as total_tipped_sats, " +
+        "coalesce((select sum(-delta_sats) from balance_ledger where discord_id = $1 and reason like 'rain:out:%' and delta_sats < 0), 0) as total_rained_sats",
       [targetId]
     );
 
     const totals = totalsResult.rows[0] || {};
     const totalDeposits = Number(totals.total_deposits_sats || 0);
     const totalWithdrawals = Number(totals.total_withdrawals_sats || 0);
+    const totalTipped = Number(totals.total_tipped_sats || 0);
+    const totalRained = Number(totals.total_rained_sats || 0);
 
     const historyResult = await query(
-      'select delta_sats, reason, created_at from balance_ledger where discord_id = $1 order by created_at desc limit 8',
+      'select delta_sats, reason, created_at from balance_ledger where discord_id = $1 order by created_at desc limit 5',
       [targetId]
     );
 
@@ -323,6 +327,8 @@ async function handleUserStatsCommand(interaction, query) {
         { name: 'Current Balance', value: formatSats(formatNumber(balance)), inline: true },
         { name: 'Total Deposits', value: formatSats(formatNumber(totalDeposits)), inline: true },
         { name: 'Total Withdrawals', value: formatSats(formatNumber(totalWithdrawals)), inline: true },
+        { name: 'Total Tipped', value: formatSats(formatNumber(totalTipped)), inline: true },
+        { name: 'Total Rained', value: formatSats(formatNumber(totalRained)), inline: true },
         { name: 'Linked Address', value: linkedAddress, inline: false }
       );
 
@@ -335,7 +341,7 @@ async function handleUserStatsCommand(interaction, query) {
         return `• ${direction} ${signed} <:_sats:1501104690790662216> — ${formatReason(entry.reason)} <t:${when}:R>`;
       });
       embed.addFields({
-        name: 'Last 8 Transactions',
+        name: 'Last 5 Transactions',
         value: lines.join('\n').slice(0, 1024),
         inline: false,
       });
