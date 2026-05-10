@@ -99,13 +99,14 @@ async function handleAdminCommand(interaction, query, coinosRequest) {
     "select " +
       "coalesce((select sum(balance_sats) from users), 0) as total_balance_sats, " +
       "coalesce((select sum(delta_sats) from balance_ledger where reason like 'deposit:%' and delta_sats > 0), 0) as total_deposits_sats, " +
-      "coalesce((select sum(-delta_sats) from balance_ledger where (reason = 'withdraw' or reason = 'pay') and delta_sats < 0), 0) as total_withdrawals_sats"
+      "coalesce((select sum(-delta_sats) from balance_ledger where (reason = 'withdraw' or reason = 'pay') and delta_sats < 0), 0) - " +
+      "coalesce((select sum(delta_sats) from balance_ledger where (reason = 'withdraw:reversal' or reason = 'pay:reversal') and delta_sats > 0), 0) as total_withdrawals_sats"
   );
 
   const totals = totalsResult.rows[0] || {};
   const totalBalance = Number(totals.total_balance_sats || 0);
   const totalDeposits = Number(totals.total_deposits_sats || 0);
-  const totalWithdrawals = Number(totals.total_withdrawals_sats || 0);
+  const totalWithdrawals = Math.max(0, Number(totals.total_withdrawals_sats || 0));
 
   let coinosBalance = 0;
   try {
@@ -167,7 +168,15 @@ async function handleAdminWithdrawalsButton(interaction, query) {
   }
 
   const withdrawals = await query(
-    "select u.discord_username, b.discord_id, -b.delta_sats as amount_sats, b.created_at, b.reason " +
+    "select u.discord_username, b.discord_id, -b.delta_sats as amount_sats, b.created_at, b.reason, " +
+      "CASE WHEN EXISTS ( " +
+        "select 1 from balance_ledger b2 " +
+        "where b2.discord_id = b.discord_id " +
+        "and (b2.reason = 'withdraw:reversal' or b2.reason = 'pay:reversal') " +
+        "and b2.delta_sats = -b.delta_sats " +
+        "and b2.created_at > b.created_at " +
+        "limit 1 " +
+      ") THEN true ELSE false END as was_reversed " +
       "from balance_ledger b " +
       "left join users u on u.discord_id = b.discord_id " +
       "where (b.reason = 'withdraw' or b.reason = 'pay') and b.delta_sats < 0 " +
@@ -195,7 +204,8 @@ async function handleAdminWithdrawalsButton(interaction, query) {
     const amount = Number(row.amount_sats || 0);
     const timestamp = Math.floor(new Date(row.created_at).getTime() / 1000);
     const type = row.reason === 'pay' ? 'Payment' : 'Withdrawal';
-    return `• ${username} ${mention} - ${formatSats(formatNumber(amount))} (${type}) <t:${timestamp}:R>`;
+    const status = row.was_reversed ? ' (Failed)' : '';
+    return `• ${username} ${mention} - ${formatSats(formatNumber(amount))} (${type}${status}) <t:${timestamp}:R>`;
   });
 
   const embed = new EmbedBuilder()
@@ -302,7 +312,8 @@ async function handleUserStatsCommand(interaction, query) {
     const totalsResult = await query(
       "select " +
         "coalesce((select sum(delta_sats) from balance_ledger where discord_id = $1 and reason like 'deposit:%' and delta_sats > 0), 0) as total_deposits_sats, " +
-        "coalesce((select sum(-delta_sats) from balance_ledger where discord_id = $1 and (reason = 'withdraw' or reason = 'pay') and delta_sats < 0), 0) as total_withdrawals_sats, " +
+        "coalesce((select sum(-delta_sats) from balance_ledger where discord_id = $1 and (reason = 'withdraw' or reason = 'pay') and delta_sats < 0), 0) - " +
+        "coalesce((select sum(delta_sats) from balance_ledger where discord_id = $1 and (reason = 'withdraw:reversal' or reason = 'pay:reversal') and delta_sats > 0), 0) as total_withdrawals_sats, " +
         "coalesce((select sum(-delta_sats) from balance_ledger where discord_id = $1 and reason like 'tip:out:%' and delta_sats < 0), 0) as total_tipped_sats, " +
         "coalesce((select sum(-delta_sats) from balance_ledger where discord_id = $1 and reason like 'rain:out:%' and delta_sats < 0), 0) as total_rained_sats",
       [targetId]
@@ -310,7 +321,7 @@ async function handleUserStatsCommand(interaction, query) {
 
     const totals = totalsResult.rows[0] || {};
     const totalDeposits = Number(totals.total_deposits_sats || 0);
-    const totalWithdrawals = Number(totals.total_withdrawals_sats || 0);
+    const totalWithdrawals = Math.max(0, Number(totals.total_withdrawals_sats || 0));
     const totalTipped = Number(totals.total_tipped_sats || 0);
     const totalRained = Number(totals.total_rained_sats || 0);
 
