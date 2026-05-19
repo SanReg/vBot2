@@ -1,6 +1,11 @@
 # payBot
 
-Discord bot for Coinos Lightning deposits and withdrawals.
+Discord bot for Coinos Lightning deposits, withdrawals and in-server tipping.
+
+## Requirements
+
+- Node.js >= 18
+- A Postgres database (Supabase recommended)
 
 ## Setup
 
@@ -15,32 +20,51 @@ Discord bot for Coinos Lightning deposits and withdrawals.
 3. Start the bot:
    - `npm start`
 
-## Supabase Postgres
+## Supabase / Postgres
 
-1. Create a Supabase project.
-2. Go to Project Settings -> Database -> Connection string.
-3. Copy the `postgresql://` connection string into `DATABASE_URL`.
-4. Apply the schema in [sql/schema.sql](sql/schema.sql).
+1. Create a Postgres project (Supabase recommended).
+2. Go to Project Settings -> Database -> Connection string and copy the `postgresql://` URL into `DATABASE_URL`.
+3. Apply the schema in [sql/schema.sql](sql/schema.sql).
+
+## What's new / Features
+
+- Deposit responses now include a QR image of the BOLT11 invoice and a "Copy Invoice" button for easy copying.
+- `/pay payreq` — pay a BOLT11 Lightning invoice directly from your bot balance.
+- `/leaderboard type` — view top rain *makers* or *catchers*.
+- `/help` — interactive help summary of available commands.
+- Admin commands: `/admin`, `/userstats`, `/changestatus` (admin-only).
 
 ## Commands
 
 - `/deposit amount:<sats>`
-  - Creates a Lightning invoice via Coinos and returns it.
+  - Creates a Lightning invoice via Coinos, shows the invoice text and a QR code image, and provides a quick "Copy Invoice" button.
 - `/link address:<name@domain>`
-   - Links a Lightning address for withdrawals.
+  - Link a Lightning Address (LNURL/pay style) for withdrawals.
 - `/withdraw amount:<sats>`
-   - Withdraws sats to your linked Lightning address.
+  - Withdraw sats to your linked Lightning address (uses the address' pay callback).
+- `/pay payreq:<bolt11>`
+  - Pay a BOLT11 invoice using your bot balance. Invoice must include an amount.
 - `/balance`
-   - Shows your balance after syncing paid deposit invoices.
+  - Shows your current balance and linked address (syncs paid deposit invoices).
 - `/tip user:<@user> amount:<sats>`
-   - Sends sats from your balance to another user.
+  - Tip another user publicly from your balance.
 - `/rain amount:<sats> maxcount:<n>`
-   - Sends sats to recent users in the current channel.
+  - Send sats to recent active users in the current channel (scans up to the last 1000 messages).
 - `/history`
-   - Shows your last 10 balance entries.
+  - Shows your last 10 balance ledger entries.
+- `/leaderboard type:<makers|catchers>`
+  - Shows top makers (who rain) or catchers (who received rain).
+- `/help`
+  - Shows the command summary.
 
 ## Rain selection
 
 `/rain` selects the most recent unique users from up to the last 1000 messages in the channel (excluding bots and the sender).
 
-Global commands can take a few minutes to appear in all servers.
+## Admin Commands (restricted)
+
+- `/admin` — shows admin dashboard with total balances and a button to view recent withdrawals.
+- `/userstats user:<@user>` — view a user's recent stats and balances.
+- `/changestatus type name` — change the bot activity status (Playing/Listening/etc.).
+
+Global slash commands may take a few minutes to appear in all servers after registering.
