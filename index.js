@@ -335,17 +335,25 @@ async function applyTransfer({ sender, recipients, amountPer, reason }) {
     throw new Error('No recipients available.');
   }
 
-  const total = amountPer * recipients.length;
+  // Sort a copy by ID to acquire row locks in consistent order (prevents deadlocks)
+  const sorted = [...recipients].sort((a, b) => a.id.localeCompare(b.id));
+
+  const total = amountPer * sorted.length;
   const clientDb = await pool.connect();
 
   try {
     await clientDb.query('begin');
-    await upsertUserTx(clientDb, sender.id, sender.username);
 
-    for (const recipient of recipients) {
-      await upsertUserTx(clientDb, recipient.id, recipient.username);
-    }
+    // Batch upsert: sender + all recipients in one query
+    const allUsers = [{ id: sender.id, username: sender.username }, ...sorted];
+    const upsertValues = allUsers.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
+    const upsertParams = allUsers.flatMap((u) => [u.id, u.username]);
+    await clientDb.query(
+      `insert into users (discord_id, discord_username) values ${upsertValues} on conflict (discord_id) do update set discord_username = excluded.discord_username`,
+      upsertParams
+    );
 
+    // Lock and check sender balance
     const balanceResult = await clientDb.query(
       'select balance_sats from users where discord_id = $1 for update',
       [sender.id]
@@ -356,25 +364,30 @@ async function applyTransfer({ sender, recipients, amountPer, reason }) {
       throw new Error('Insufficient balance.');
     }
 
+    // Debit sender
     await clientDb.query('update users set balance_sats = balance_sats - $1 where discord_id = $2', [
       total,
       sender.id,
     ]);
     await clientDb.query(
       'insert into balance_ledger (discord_id, delta_sats, reason) values ($1, $2, $3)',
-      [sender.id, -total, `${reason}:out:${recipients.length}`]
+      [sender.id, -total, `${reason}:out:${sorted.length}`]
     );
 
-    for (const recipient of recipients) {
-      await clientDb.query('update users set balance_sats = balance_sats + $1 where discord_id = $2', [
-        amountPer,
-        recipient.id,
-      ]);
-      await clientDb.query(
-        'insert into balance_ledger (discord_id, delta_sats, reason) values ($1, $2, $3)',
-        [recipient.id, amountPer, `${reason}:from:${sender.id}`]
-      );
-    }
+    // Batch credit all recipients in one UPDATE
+    const recipientIds = sorted.map((r) => r.id);
+    await clientDb.query(
+      'update users set balance_sats = balance_sats + $1 where discord_id = any($2)',
+      [amountPer, recipientIds]
+    );
+
+    // Batch insert all recipient ledger entries in one query
+    const ledgerValues = sorted.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ');
+    const ledgerParams = sorted.flatMap((r) => [r.id, amountPer, `${reason}:from:${sender.id}`]);
+    await clientDb.query(
+      `insert into balance_ledger (discord_id, delta_sats, reason) values ${ledgerValues}`,
+      ledgerParams
+    );
 
     await clientDb.query('commit');
     return total;
@@ -1002,11 +1015,18 @@ client.on('interactionCreate', async (interaction) => {
 
       await safeEditReply(interaction, { embeds: [embed] });
 
-      for (const recipient of recipients) {
-        const user = await client.users.fetch(recipient.id);
-        await sendDm(
-          user,
-          `<a:rain:1501110375154978916> ${interaction.user.toString()} rained you ${formatSats(amount)}`
+      // Send DMs in parallel batches of 5 to respect Discord rate limits
+      const DM_BATCH_SIZE = 5;
+      for (let i = 0; i < recipients.length; i += DM_BATCH_SIZE) {
+        const batch = recipients.slice(i, i + DM_BATCH_SIZE);
+        await Promise.allSettled(
+          batch.map(async (recipient) => {
+            const user = await client.users.fetch(recipient.id);
+            await sendDm(
+              user,
+              `<a:rain:1501110375154978916> ${interaction.user.toString()} rained you ${formatSats(amount)}`
+            );
+          })
         );
       }
     } catch (error) {
