@@ -19,7 +19,6 @@ const QRCode = require('qrcode');
 const crypto = require('crypto');
 const bolt11 = require('bolt11');
 const { setBotStatus } = require('./status');
-const { handleTipMessage } = require('./other');
 const { adminCommand, userStatsCommand, changeStatusCommand, handleAdminCommand, handleAdminWithdrawalsButton, handleUserStatsCommand, handleChangeStatusCommand } = require('./admin');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -591,7 +590,6 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.MessageContent,
   ],
 });
 
@@ -1406,15 +1404,6 @@ client.on('interactionCreate', async (interaction) => {
         console.error('Failed to send change status error response:', responseError.message);
       }
     }
-  }
-});
-
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-  try {
-    await handleTipMessage(message);
-  } catch (error) {
-    console.error('Prefix tip message handler failed:', error.message);
   }
 });
 
