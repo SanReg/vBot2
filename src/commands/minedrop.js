@@ -72,7 +72,7 @@ function buildMinedropRows(drop, isEnded) {
       if (isEnded) {
         btn.setDisabled(true);
         if (buttonIndex === drop.treasureIndex) {
-          btn.setStyle(ButtonStyle.Success).setEmoji(EMOJI_ID.sats);
+          btn.setStyle(ButtonStyle.Success).setEmoji(EMOJI_ID.crown);
         } else if (guessed.has(buttonIndex)) {
           btn.setStyle(ButtonStyle.Danger).setEmoji(EMOJI_ID.mineMiss);
         } else {
