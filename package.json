@@ -2,9 +2,9 @@
   "name": "paybot",
   "version": "1.0.0",
   "description": "Discord bot for Coinos Lightning deposits and withdrawals",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node src/index.js"
   },
   "engines": {
     "node": ">=18"

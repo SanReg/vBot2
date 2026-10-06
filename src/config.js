@@ -1,0 +1,32 @@
+const dotenv = require('dotenv');
+
+dotenv.config();
+
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const COINOS_TOKEN = process.env.COINOS_TOKEN;
+const COINOS_PIN = process.env.COINOS_PIN;
+const DATABASE_URL = process.env.DATABASE_URL;
+const COINOS_API = 'https://coinos.io/api';
+const GUILD_IDS = ['931174322989580308', '1000390553357262848', '1409502806506864671'];
+const INVOICE_EXPIRY_SECONDS = 10 * 60;
+const DEPOSIT_POLL_INTERVAL_MS = 10 * 1000;
+
+if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID || !COINOS_TOKEN || !COINOS_PIN || !DATABASE_URL) {
+  console.error(
+    'Missing required env vars. Set DISCORD_TOKEN, DISCORD_CLIENT_ID, COINOS_TOKEN, COINOS_PIN, DATABASE_URL.'
+  );
+  process.exit(1);
+}
+
+module.exports = {
+  DISCORD_TOKEN,
+  DISCORD_CLIENT_ID,
+  COINOS_TOKEN,
+  COINOS_PIN,
+  DATABASE_URL,
+  COINOS_API,
+  GUILD_IDS,
+  INVOICE_EXPIRY_SECONDS,
+  DEPOSIT_POLL_INTERVAL_MS,
+};
