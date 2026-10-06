@@ -32,3 +32,18 @@ create table if not exists lightning_invoices (
 );
 
 create index if not exists lightning_invoices_discord_id_idx on lightning_invoices(discord_id);
+
+-- Open minedrops only: a row is deleted in the same transaction that pays the drop out.
+create table if not exists minedrops (
+  id uuid primary key,
+  host_id text not null,
+  amount_sats bigint not null,
+  tiles integer not null,
+  treasure_index integer not null,
+  channel_id text not null,
+  message_id text,
+  tried_users text[] not null default '{}',
+  guessed_indices integer[] not null default '{}',
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
