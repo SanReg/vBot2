@@ -21,7 +21,9 @@ async function execute(interaction) {
       '**$tip <@user> [<@user>...] <amount>** — Tip multiple users from your balance (public)',
       '**/tip user amount** — Tip a user from your balance (public). Tips, rain and minedrops accept up to 2 decimals, e.g. 0.25',
       '**/rain amount maxcount** — Rain sats on recent users in a channel',
+      '**/drop amount messageid reaction** — Send sats to everyone who reacted to a message',
       '**/leaderboard type** — Top makers or catchers',
+      '**/block add|remove|list** — Exclude users from your rains, drops and minedrops',
     ].join('\n'),
     color: 0x9b59b6,
   });

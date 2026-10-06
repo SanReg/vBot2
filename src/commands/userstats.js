@@ -1,8 +1,18 @@
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags,
+} = require('discord.js');
 const { query } = require('../db');
+const { listBlocks } = require('../services/blocks');
 const { formatSats, formatNumber, formatReason } = require('../utils/format');
 const { isAuthorized, denyEmbed, isInteractionGoneError, runAdminCommand } = require('../utils/admin');
 const { EMOJI } = require('../emoji');
+
+const BLOCKLIST_BUTTON_PREFIX = 'userstats_blocklist:';
 
 const data = new SlashCommandBuilder()
   .setName('userstats')
@@ -108,7 +118,14 @@ async function handleUserStatsCommand(interaction) {
       });
     }
 
-    await interaction.editReply({ embeds: [embed] });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${BLOCKLIST_BUTTON_PREFIX}${targetId}`)
+        .setLabel('View Blocklist')
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.editReply({ embeds: [embed], components: [row] });
   } catch (error) {
     console.error('Failed to fetch user stats:', error.message);
     const embed = new EmbedBuilder()
@@ -125,8 +142,55 @@ async function handleUserStatsCommand(interaction) {
   }
 }
 
+async function handleUserBlocklistButton(interaction) {
+  if (!isAuthorized(interaction)) {
+    try {
+      await interaction.reply({ embeds: [denyEmbed()], flags: MessageFlags.Ephemeral });
+    } catch (error) {
+      if (!isInteractionGoneError(error)) {
+        throw error;
+      }
+    }
+    return;
+  }
+
+  const targetId = interaction.customId.slice(BLOCKLIST_BUTTON_PREFIX.length);
+
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  } catch (error) {
+    if (isInteractionGoneError(error)) {
+      return;
+    }
+    throw error;
+  }
+
+  const blocks = await listBlocks(targetId);
+  const lines = blocks.map((block) => {
+    const when = Math.floor(block.createdAt.getTime() / 1000);
+    return `• ${block.username} (<@${block.id}>) <t:${when}:R>`;
+  });
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Blocklist (${blocks.length})`)
+    .setDescription(
+      blocks.length > 0
+        ? `Blocked by <@${targetId}>:\n${lines.join('\n')}`.slice(0, 3900)
+        : `<@${targetId}> has not blocked anyone.`
+    )
+    .setColor(blocks.length > 0 ? 0x3498db : 0x95a5a6);
+
+  try {
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    if (!isInteractionGoneError(error)) {
+      throw error;
+    }
+  }
+}
+
 async function execute(interaction) {
   await runAdminCommand(interaction, { label: 'User stats', title: 'User Stats Failed ⚠️' }, handleUserStatsCommand);
 }
 
-module.exports = { data, execute };
+module.exports = { data, execute, BLOCKLIST_BUTTON_PREFIX, handleUserBlocklistButton };

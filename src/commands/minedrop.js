@@ -16,6 +16,7 @@ const {
   claimMinedrop,
   refundMinedrop,
 } = require('../services/minedrops');
+const { isBlocked } = require('../services/blocks');
 const { formatSats } = require('../utils/format');
 const { MIN_AMOUNT, INVALID_AMOUNT_MESSAGE, parseAmount } = require('../utils/amount');
 const { safeDeferReply, safeEditReply, sendDm } = require('../utils/interactions');
@@ -245,6 +246,11 @@ async function handleMinedropButton(interaction) {
   const drop = await getMinedrop(dropId);
   if (!drop) {
     await notify('This minedrop is no longer active.');
+    return;
+  }
+
+  if (await isBlocked(drop.hostId, interaction.user.id)) {
+    await notify('You cannot play this minedrop.');
     return;
   }
 

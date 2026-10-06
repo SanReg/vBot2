@@ -70,8 +70,12 @@ Deployment steps are in [docs/deployment.md](docs/deployment.md).
   - Tip another user publicly from your balance.
 - `/rain amount:<sats> maxcount:<n>`
   - Send sats to recent active users in the current channel (scans up to the last 1000 messages).
+- `/drop amount:<sats> messageid:<id or link> reaction:<emoji>`
+  - Send `amount` to each user who reacted to a message (any reaction, or only `reaction` if given). Skips bots, yourself and anyone on your blocklist; limited to the first 50 users.
 - `/minedrop amount:<sats> tiles:<2x2|3x3|4x4|5x5> duration:<5m|2h|24h>`
   - Drop sats on a board of hidden squares; the first user to click the treasure square wins. One try per user. Unclaimed drops expire after `duration` (default 5 minutes, 1 minute to 24 hours) and refund the host. Open drops are stored in the `minedrops` table, so they survive a restart.
+- `/block add user:<@user>` / `/block remove user:<@user>` / `/block list`
+  - Manage your blocklist (up to 100 users). Blocked users are skipped by your `/rain` and `/drop` and cannot play your `/minedrop`. One-way: it does not affect what you receive from them, and `/tip` still works. Admins can view a user's blocklist from `/userstats`.
 - `/history`
   - Shows your last 10 balance ledger entries.
 - `/leaderboard type:<makers|catchers>`

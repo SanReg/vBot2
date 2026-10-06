@@ -53,3 +53,11 @@ create table if not exists minedrops (
 alter table users alter column balance_sats type numeric(20,2);
 alter table balance_ledger alter column delta_sats type numeric(20,2);
 alter table minedrops alter column amount_sats type numeric(20,2);
+
+-- One-way blocks: the blocker's rains skip blocked_id, and blocked_id cannot play the blocker's minedrops.
+create table if not exists user_blocks (
+  blocker_id text not null,
+  blocked_id text not null,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id)
+);

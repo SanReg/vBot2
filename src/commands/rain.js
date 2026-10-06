@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { getBlockedIds } = require('../services/blocks');
 const { ensureUser, applyTransfer } = require('../services/wallet');
 const { truncateText, formatSats } = require('../utils/format');
 const { MIN_AMOUNT, INVALID_AMOUNT_MESSAGE, parseAmount } = require('../utils/amount');
@@ -25,7 +26,7 @@ const data = new SlashCommandBuilder()
       .setMaxValue(50)
   );
 
-async function getRecentRecipients(channel, excludeId, count) {
+async function getRecentRecipients(channel, excludeId, count, blockedIds) {
   const recipients = [];
   const seen = new Set();
   let lastId;
@@ -40,6 +41,7 @@ async function getRecentRecipients(channel, excludeId, count) {
     for (const message of batch.values()) {
       if (!message.author || message.author.bot) continue;
       if (message.author.id === excludeId) continue;
+      if (blockedIds.has(message.author.id)) continue;
       if (seen.has(message.author.id)) continue;
 
       seen.add(message.author.id);
@@ -86,7 +88,8 @@ async function execute(interaction) {
   }
 
   try {
-    const recipients = await getRecentRecipients(interaction.channel, interaction.user.id, maxcount);
+    const blockedIds = await getBlockedIds(interaction.user.id);
+    const recipients = await getRecentRecipients(interaction.channel, interaction.user.id, maxcount, blockedIds);
 
     console.log('Rain recipients:', recipients);
 

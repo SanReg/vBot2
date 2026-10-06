@@ -3,6 +3,7 @@ const { commands } = require('../commands');
 const { handleCopyInvoiceButton } = require('../commands/deposit');
 const { handleMinedropButton } = require('../commands/minedrop');
 const { handleAdminWithdrawalsButton } = require('../commands/admin');
+const { BLOCKLIST_BUTTON_PREFIX, handleUserBlocklistButton } = require('../commands/userstats');
 const { safeEditReply } = require('../utils/interactions');
 
 async function handleButton(interaction) {
@@ -15,6 +16,11 @@ async function handleButton(interaction) {
 
   if (customId.startsWith('minedrop:click:')) {
     await handleMinedropButton(interaction);
+    return;
+  }
+
+  if (customId.startsWith(BLOCKLIST_BUTTON_PREFIX)) {
+    await handleUserBlocklistButton(interaction);
     return;
   }
 

@@ -39,6 +39,14 @@ function formatReason(reason) {
     return `Rain received ${EMOJI.rain}`;
   }
 
+  if (reason.startsWith('drop:out:')) {
+    return `Drop sent ${EMOJI.bump}`;
+  }
+
+  if (reason.startsWith('drop:from:')) {
+    return `Drop received ${EMOJI.bump}`;
+  }
+
   if (reason === 'withdraw') {
     return `Withdrawal ${EMOJI.purpleflame}`;
   }
