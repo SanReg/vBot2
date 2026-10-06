@@ -19,7 +19,7 @@ async function execute(interaction) {
       '**/withdraw amount** — Withdraw to your linked Lightning address',
       '**/pay payreq** — Pay a Lightning invoice from your balance',
       '**$tip <@user> [<@user>...] <amount>** — Tip multiple users from your balance (public)',
-      '**/tip user amount** — Tip a user from your balance (public)',
+      '**/tip user amount** — Tip a user from your balance (public). Tips, rain and minedrops accept up to 2 decimals, e.g. 0.25',
       '**/rain amount maxcount** — Rain sats on recent users in a channel',
       '**/leaderboard type** — Top makers or catchers',
     ].join('\n'),

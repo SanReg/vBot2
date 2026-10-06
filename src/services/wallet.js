@@ -1,5 +1,6 @@
 const { pool, query } = require('../db');
 const { coinosRequest } = require('./coinos');
+const { multiplyAmount } = require('../utils/amount');
 
 async function ensureUser(discordId, discordUsername) {
   await query(
@@ -71,7 +72,7 @@ async function applyTransfer({ sender, recipients, amountPer, reason }) {
   // Sort a copy by ID to acquire row locks in consistent order (prevents deadlocks)
   const sorted = [...recipients].sort((a, b) => a.id.localeCompare(b.id));
 
-  const total = amountPer * sorted.length;
+  const total = multiplyAmount(amountPer, sorted.length);
   const clientDb = await pool.connect();
 
   try {
@@ -93,7 +94,7 @@ async function applyTransfer({ sender, recipients, amountPer, reason }) {
     );
     const balance = balanceResult.rows[0] ? balanceResult.rows[0].balance_sats : 0;
 
-    if (balance < total) {
+    if (Number(balance) < total) {
       throw new Error('Insufficient balance.');
     }
 
@@ -142,7 +143,7 @@ async function debitBalanceTx(clientDb, discordId, discordUsername, amountSats, 
   );
   const balance = balanceResult.rows[0] ? balanceResult.rows[0].balance_sats : 0;
 
-  if (balance < amountSats) {
+  if (Number(balance) < amountSats) {
     throw new Error('Insufficient balance.');
   }
 

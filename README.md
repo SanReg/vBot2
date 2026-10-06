@@ -79,6 +79,10 @@ Deployment steps are in [docs/deployment.md](docs/deployment.md).
 - `/help`
   - Shows the command summary.
 
+## Amounts
+
+Balances are kept to two decimal places. `/tip`, `/rain` and `/minedrop` accept amounts such as `0.25` (minimum `0.01`). `/deposit`, `/withdraw` and `/pay` work in whole sats only, so a fractional remainder can be tipped but not withdrawn on its own.
+
 ## Rain selection
 
 `/rain` selects the most recent unique users from up to the last 1000 messages in the channel (excluding bots and the sender).

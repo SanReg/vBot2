@@ -7,7 +7,9 @@ function truncateText(value, maxLength) {
 }
 
 function formatSats(amount) {
-  return `${amount} ${EMOJI.sats}`;
+  // Database amounts arrive as text like "5.00": show 5, and keep fractions such as 5.25.
+  const isPlainNumber = typeof amount === 'string' && /^-?\d+(\.\d+)?$/.test(amount);
+  return `${isPlainNumber ? Number(amount) : amount} ${EMOJI.sats}`;
 }
 
 function formatNumber(value) {

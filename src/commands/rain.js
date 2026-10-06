@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { ensureUser, applyTransfer } = require('../services/wallet');
 const { truncateText, formatSats } = require('../utils/format');
+const { MIN_AMOUNT, INVALID_AMOUNT_MESSAGE, parseAmount } = require('../utils/amount');
 const { buildEmbed, safeDeferReply, safeEditReply, sendDm } = require('../utils/interactions');
 const { EMOJI } = require('../emoji');
 
@@ -8,12 +9,12 @@ const data = new SlashCommandBuilder()
   .setName('rain')
   .setDescription('Send sats to recent users in this channel')
   .setDMPermission(false)
-  .addIntegerOption((option) =>
+  .addNumberOption((option) =>
     option
       .setName('amount')
-      .setDescription('Amount per user in satoshis')
+      .setDescription('Amount per user in satoshis (up to 2 decimals)')
       .setRequired(true)
-      .setMinValue(1)
+      .setMinValue(MIN_AMOUNT)
   )
   .addIntegerOption((option) =>
     option
@@ -52,10 +53,20 @@ async function getRecentRecipients(channel, excludeId, count) {
 }
 
 async function execute(interaction) {
-  const amount = interaction.options.getInteger('amount', true);
+  const amount = parseAmount(interaction.options.getNumber('amount', true));
   const maxcount = interaction.options.getInteger('maxcount', true);
 
   if (!(await safeDeferReply(interaction, { ephemeral: false }))) return;
+
+  if (amount === null) {
+    const embed = buildEmbed({
+      title: 'Rain Failed ⚠️',
+      description: INVALID_AMOUNT_MESSAGE,
+      color: 0xe74c3c,
+    });
+    await safeEditReply(interaction, { embeds: [embed] });
+    return;
+  }
 
   const preparingEmbed = buildEmbed({
     title: `${EMOJI.rain} Preparing Rain`,

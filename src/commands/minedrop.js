@@ -17,6 +17,7 @@ const {
   refundMinedrop,
 } = require('../services/minedrops');
 const { formatSats } = require('../utils/format');
+const { MIN_AMOUNT, INVALID_AMOUNT_MESSAGE, parseAmount } = require('../utils/amount');
 const { safeDeferReply, safeEditReply, sendDm } = require('../utils/interactions');
 const { EMOJI, EMOJI_ID } = require('../emoji');
 
@@ -37,12 +38,12 @@ const data = new SlashCommandBuilder()
   .setName('minedrop')
   .setDescription('Drop an amount to be mined by finding the right square')
   .setDMPermission(false)
-  .addIntegerOption((option) =>
+  .addNumberOption((option) =>
     option
       .setName('amount')
-      .setDescription('Amount in satoshis')
+      .setDescription('Amount in satoshis (up to 2 decimals)')
       .setRequired(true)
-      .setMinValue(1)
+      .setMinValue(MIN_AMOUNT)
   )
   .addIntegerOption((option) =>
     option
@@ -165,12 +166,17 @@ async function resumeMinedrops(client) {
 }
 
 async function execute(interaction) {
-  const amount = interaction.options.getInteger('amount', true);
+  const amount = parseAmount(interaction.options.getNumber('amount', true));
   const tiles = interaction.options.getInteger('tiles') || DEFAULT_TILES;
 
   const durationMs = parseDuration(interaction.options.getString('duration'));
 
   if (!(await safeDeferReply(interaction))) return;
+
+  if (amount === null) {
+    await safeEditReply(interaction, { content: INVALID_AMOUNT_MESSAGE });
+    return;
+  }
 
   if (durationMs === null) {
     await safeEditReply(interaction, {

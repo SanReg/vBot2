@@ -1,6 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { ensureUser, applyTransfer } = require('../services/wallet');
 const { truncateText, formatSats } = require('../utils/format');
+const { MIN_AMOUNT, INVALID_AMOUNT_MESSAGE, parseAmount } = require('../utils/amount');
 const { buildEmbed, safeDeferReply, safeEditReply, sendDm } = require('../utils/interactions');
 const { EMOJI } = require('../emoji');
 
@@ -14,19 +15,29 @@ const data = new SlashCommandBuilder()
       .setDescription('User to tip')
       .setRequired(true)
   )
-  .addIntegerOption((option) =>
+  .addNumberOption((option) =>
     option
       .setName('amount')
-      .setDescription('Amount in satoshis')
+      .setDescription('Amount in satoshis (up to 2 decimals)')
       .setRequired(true)
-      .setMinValue(1)
+      .setMinValue(MIN_AMOUNT)
   );
 
 async function execute(interaction) {
   const recipientUser = interaction.options.getUser('user', true);
-  const amount = interaction.options.getInteger('amount', true);
+  const amount = parseAmount(interaction.options.getNumber('amount', true));
 
   if (!(await safeDeferReply(interaction, { ephemeral: false }))) return;
+
+  if (amount === null) {
+    const embed = buildEmbed({
+      title: 'Tip Failed ⚠️',
+      description: INVALID_AMOUNT_MESSAGE,
+      color: 0xe74c3c,
+    });
+    await safeEditReply(interaction, { embeds: [embed] });
+    return;
+  }
 
   if (recipientUser.bot) {
     const embed = buildEmbed({
